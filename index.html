@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Tabview</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Tabview</h1>
+        <nav aria-label="Dashboard"><button id="recovery-open">Recovery</button><button id="settings-open">Settings</button></nav>
+      </header>
+      <label class="sr-only" for="search">Search titles and URLs</label>
+      <input id="search" type="search" placeholder="Search tabs…" autocomplete="off" autofocus />
+      <div class="controls">
+        <label>Group <select id="group"><option value="none">None</option><option value="domain">Domain</option><option value="opened">Date opened</option><option value="accessed">Last accessed</option><option value="topic">Topic</option></select></label>
+        <label>Sort <select id="sort"><option value="recent">Recent first</option><option value="loaded">Loaded first</option><option value="unloaded">Unloaded first</option></select></label>
+        <label>Window <select id="window"><option value="all">All windows</option></select></label>
+        <label>Age <select id="age"><option value="all">Any age</option><option value="7">Not accessed in 7 days</option><option value="30">Not accessed in 30 days</option><option value="unknown">Unknown last access</option></select></label>
+        <label>View <select id="layout"><option value="grid">Grid</option><option value="list">List</option></select></label>
+        <details class="include"><summary>Include</summary><div><label><input id="include-pinned" type="checkbox" /> Pinned tabs</label><label><input id="include-audible" type="checkbox" /> Audible tabs</label></div></details>
+      </div>
+      <div class="list-toolbar"><span id="count" aria-live="polite">Loading tabs…</span><button id="select-all">Select all matching</button></div>
+      <p id="status" role="status" hidden></p>
+      <div id="results" tabindex="-1" aria-label="Tabs" aria-busy="true"></div>
+      <div id="bulk" hidden><strong id="selected-count"></strong><button id="clear-selection">Clear</button><button id="close-selected">Review close…</button></div>
+      <footer id="keyboard-help">Arrow keys navigate · Enter opens · Drag adds to selection · Backspace closes selected · Shift-click selects a range</footer>
+    </main>
+    <dialog id="close-dialog" aria-labelledby="close-title">
+      <h2 id="close-title">Close selected tabs?</h2>
+      <p id="close-description"></p>
+      <ul id="close-list" class="preview-list"></ul>
+      <p class="muted">A local recovery list is saved first. Reopening URLs cannot restore forms, history, or scroll position.</p>
+      <div class="dialog-actions"><button data-dismiss>Cancel</button><button id="confirm-close">Close tabs</button></div>
+    </dialog>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <h2 id="settings-title">Settings</h2>
+      <label class="stack" for="shortcut">Open dashboard shortcut</label>
+      <div class="shortcut-controls"><input id="shortcut" type="text" placeholder="Ctrl+Alt+Y" autocomplete="off" spellcheck="false" aria-describedby="shortcut-help" /><button id="shortcut-update">Apply shortcut</button><button id="shortcut-reset">Reset</button></div>
+      <p id="shortcut-help" class="muted">Use a shortcut like Ctrl+Alt+Y, or leave blank to disable. Changes apply immediately. You can also use Manage Extension Shortcuts in about:addons.</p>
+      <p id="shortcut-status" role="status"></p>
+      <details class="keyboard-settings"><summary>Dashboard keyboard shortcuts</summary>
+      <p class="muted">Use a key like Escape, Delete, or Ctrl+Shift+K. Meta means Command on macOS. Leave blank to disable. These apply inside Tabview; text editing and normal Tab navigation remain available. Save to apply.</p>
+      <div id="keybindings"></div><button id="bindings-reset" type="button">Reset dashboard shortcuts</button></details>
+      <label class="stack" for="memory-address">Memory diagnostics</label>
+      <div class="shortcut-controls"><input id="memory-address" type="text" value="about:processes" readonly /><button id="memory-diagnostics">Copy address</button></div>
+      <p class="muted">Firefox does not expose per-tab RAM to extensions. Loaded/unloaded labels show tab state, not memory usage. Paste about:processes into the address bar to see browser memory diagnostics; processes can contain several tabs. Firefox blocks extensions from opening this page directly.</p>
+      <label class="stack">Topic rules<textarea id="topic-rules" rows="8" placeholder="Research: paper, arxiv, study&#10;Development: github, docs"></textarea></label>
+      <p class="muted">One topic per line: Name: keyword, keyword. Match titles and URLs; the first matching rule wins.</p>
+      <label><input id="preserve-containers" type="checkbox" /> Preserve containers for recovery</label>
+      <p class="muted">Optional browser permission. Enable before closing container tabs. Tabview does not read cookie contents.</p>
+      <p id="settings-status" role="status"></p>
+      <div class="dialog-actions"><button data-dismiss>Cancel</button><button id="save-settings">Save</button></div>
+    </dialog>
+    <dialog id="recovery-dialog" aria-labelledby="recovery-title">
+      <h2 id="recovery-title">Recovery</h2>
+      <p class="muted">The latest 20 batches stay on this device. Reopening restores URLs, not page state or Zen workspace placement. Containers are preserved only if enabled before closing.</p>
+      <div id="recovery-list"></div>
+      <p id="recovery-status" role="status"></p>
+      <div class="dialog-actions"><button data-dismiss>Done</button></div>
+    </dialog>
+    <script type="module" src="/src/dashboard.ts"></script>
+  </body>
+</html>
