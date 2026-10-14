@@ -2,6 +2,8 @@
 
 I slopped this together because I hoard too many tabs in Zen (500+) and need a good way to manage and bulk close them.
 
+works well with the [Advanced-Tab-Groups](https://github.com/Vertex-Mods/Advanced-Tab-Groups) [sine](https://github.com/CosmoCreeper/Sine) plugin 
+
 ## features
 
 - fuzzy search by title or URL
@@ -13,11 +15,14 @@ I slopped this together because I hoard too many tabs in Zen (500+) and need a g
 - reopen closed tabs from local recovery
 - customizable keyboard shortcuts
 
-![Tabview dashboard](docs/screenshots/dashboard.png)
+![Tabview dashboard with browser group badges](docs/screenshots/dashboard.png)
+
+![Tabs grouped by date opened](docs/screenshots/date-opened.png)
 
 ![Tabs grouped by domain](docs/screenshots/domains.png)
 
-![Search and tab selection](docs/screenshots/search-selection.png)
+![Tabs grouped by browser group](docs/screenshots/browser-groups.png)
+
 
 ## try it
 
