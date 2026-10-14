@@ -1,6 +1,6 @@
 import { request } from './client';
 import { create, element } from './dom';
-import { DEFAULT_BINDINGS, KEY_LABELS, validateBindings } from './keybindings';
+import { DEFAULT_BINDINGS, KEY_LABELS, resolveBindings, validateBindings } from './keybindings';
 import type { KeyAction } from './keybindings';
 import { parseTopics } from './model';
 import type { Preferences } from './types';
@@ -30,7 +30,7 @@ export function installSettings(callbacks: SettingsCallbacks): void {
   });
   function renderBindingSettings(reset = false): void {
     const list = element('keybindings'); list.replaceChildren();
-    const bindings = reset ? DEFAULT_BINDINGS : { ...DEFAULT_BINDINGS, ...callbacks.preferences().keybindings };
+    const bindings = reset ? DEFAULT_BINDINGS : resolveBindings(callbacks.preferences().keybindings);
     for (const action of Object.keys(DEFAULT_BINDINGS) as KeyAction[]) {
       list.append(create('label', {}, KEY_LABELS[action], create('input', { type: 'text', data: { action }, value: bindings[action], autocomplete: 'off', spellcheck: false })));
     }

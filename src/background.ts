@@ -1,7 +1,8 @@
+import { groupingAPI } from './browser-groups';
 import { validateBindings } from './keybindings';
 import { RecoveryService } from './recovery';
 import { DEFAULT_PREFERENCES } from './types';
-import type { Preferences, RecoveryBatch, Request, Response, Snapshot, TabRecord } from './types';
+import type { GroupResult, Preferences, RecoveryBatch, Request, Response, Snapshot, TabRecord } from './types';
 
 const METADATA = 'tabview.metadata.v1';
 const RECOVERY = 'tabview.recovery.v1';
@@ -34,6 +35,7 @@ async function record(tab: browser.tabs.Tab): Promise<TabRecord> {
   return {
     id: tab.id, key: value.key, windowId: tab.windowId, index: tab.index,
     title: tab.title ?? tab.url ?? 'Untitled', url: tab.url ?? '',
+    groupId: (tab as browser.tabs.Tab & { groupId?: number }).groupId,
     openedAt: value.openedAt, lastAccessed: tab.lastAccessed,
     pinned: tab.pinned, audible: tab.audible ?? false, hidden: tab.hidden ?? false,
     discarded: tab.discarded ?? false, cookieStoreId: tab.cookieStoreId, favIconUrl: tab.favIconUrl,
@@ -83,6 +85,8 @@ browser.tabs.onCreated.addListener(tab => {
 browser.tabs.onRemoved.addListener(id => { metadata.delete(id); changed(); });
 for (const event of [browser.tabs.onUpdated, browser.tabs.onActivated, browser.tabs.onMoved, browser.tabs.onAttached, browser.tabs.onDetached, browser.permissions.onAdded, browser.permissions.onRemoved]) event.addListener(changed);
 browser.storage.onChanged.addListener((changes, area) => { if (area === 'local' && PREFERENCES in changes) changed(); });
+const groupAPI = groupingAPI();
+if (groupAPI) for (const event of [groupAPI.groups.onCreated, groupAPI.groups.onUpdated, groupAPI.groups.onRemoved, groupAPI.groups.onMoved]) event.addListener(changed);
 const ports = new Set<browser.runtime.Port>();
 let changeTimer: ReturnType<typeof setTimeout> | undefined;
 function changed(): void {
@@ -115,7 +119,7 @@ browser.action.onClicked.addListener(() => { void openDashboard().catch(console.
 browser.commands.onCommand.addListener(command => { if (command === 'open-dashboard') void openDashboard().catch(console.error); });
 
 function validatePreferences(value: Preferences): Preferences {
-  if (!['none', 'domain', 'opened', 'accessed', 'topic'].includes(value.group) || !Array.isArray(value.topics)) throw new Error('Invalid settings.');
+  if (!['none', 'domain', 'opened', 'accessed', 'topic', 'browser'].includes(value.group) || !Array.isArray(value.topics)) throw new Error('Invalid settings.');
   if (value.sort !== undefined && !['recent', 'loaded', 'unloaded'].includes(value.sort)) throw new Error('Invalid sort.');
   if (value.layout !== undefined && !['grid', 'list'].includes(value.layout)) throw new Error('Invalid layout.');
   if (value.topics.some(rule => typeof rule.name !== 'string' || !rule.name.trim() || !Array.isArray(rule.keywords) || !rule.keywords.length || rule.keywords.some(word => typeof word !== 'string' || !word.trim()))) throw new Error('Invalid topic rule.');
@@ -125,11 +129,48 @@ function validatePreferences(value: Preferences): Preferences {
 async function handle(request: Request): Promise<unknown> {
   await ready;
   switch (request.type) {
-    case 'snapshot': return {
-      tabs: await listTabs(),
-      preferences: (await browser.storage.local.get(PREFERENCES))[PREFERENCES] ?? DEFAULT_PREFERENCES,
-      containers: await browser.permissions.contains({ permissions: ['cookies'] }),
-    } satisfies Snapshot;
+    case 'snapshot': {
+      const api = groupingAPI();
+      const windows = (await browser.windows.getAll({ windowTypes: ['normal'] })).filter(window => !window.incognito && window.id !== undefined);
+      let groupingAvailable = !!api;
+      let browserGroups: Snapshot['browserGroups'] = [];
+      if (api) {
+        try { browserGroups = (await api.groups.query({})).filter(group => windows.some(window => window.id === group.windowId)); }
+        catch { groupingAvailable = false; }
+      }
+      return {
+        tabs: await listTabs(),
+        preferences: (await browser.storage.local.get(PREFERENCES))[PREFERENCES] ?? DEFAULT_PREFERENCES,
+        groupingAvailable, browserGroups, groupWindows: windows.map(window => ({ id: window.id! })),
+        containers: await browser.permissions.contains({ permissions: ['cookies'] }),
+      } satisfies Snapshot;
+    }
+    case 'group-tabs': return serialize(async (): Promise<GroupResult> => {
+      const api = groupingAPI();
+      if (!api) throw new Error('Browser tab grouping is unavailable in this browser.');
+      if (!Array.isArray(request.targets) || !request.targets.length || request.targets.some(target => !Number.isInteger(target.id)) || new Set(request.targets.map(target => target.id)).size !== request.targets.length) throw new Error('Select tabs to group.');
+      const destination = request.destination;
+      if (!destination || typeof destination !== 'object') throw new Error('Choose a destination group.');
+      const existing = 'groupId' in destination;
+      if (existing ? !Number.isInteger(destination.groupId) : typeof destination.name !== 'string' || !destination.name.trim() || !Number.isInteger(destination.windowId)) throw new Error('Choose a group or enter a new group name and window.');
+      const windowId = existing ? (await api.groups.get(destination.groupId)).windowId : destination.windowId;
+      const window = await browser.windows.get(windowId);
+      if (window.incognito || window.type !== 'normal') throw new Error('Choose a regular browser window.');
+      const records = await Promise.all(request.targets.map(async target => {
+        const tab = await record(await browser.tabs.get(target.id));
+        if (tab.key !== target.key || tab.url !== target.url) throw new Error('Selected tabs changed. Refresh your selection and try again.');
+        return tab;
+      }));
+      records.sort((a, b) => a.windowId - b.windowId || a.index - b.index);
+      const groupId = await api.tabs.group({ tabIds: records.map(tab => tab.id), ...(existing ? { groupId: destination.groupId } : { createProperties: { windowId } }) });
+      let warning: string | undefined;
+      if (!existing) {
+        try { await api.groups.update(groupId, { title: destination.name.trim() }); }
+        catch { warning = 'Tabs were grouped, but the group could not be named. Rename it in the browser.'; }
+      }
+      changed();
+      return { groupId, grouped: records.length, warning };
+    });
     case 'activate': {
       const tab = await browser.tabs.get(request.id);
       if (!isManaged(tab)) throw new Error('This tab is no longer available.');

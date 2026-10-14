@@ -1,4 +1,6 @@
-import { DEFAULT_BINDINGS } from './keybindings';
+import { installGrouping } from './group-dialog';
+import { groupColor } from './browser-groups';
+import { resolveBindings } from './keybindings';
 import { create, element } from './dom';
 import { installSettings } from './settings';
 import { installRecovery } from './recovery-dialog';
@@ -6,10 +8,10 @@ import { installKeyboard } from './keyboard';
 import { createTabRenderer } from './tab-renderer';
 import './style.css';
 import { request, subscribe } from './client';
-import { groupResults, searchTabs, selectable, selectRange } from './model';
+import { groupByBrowser, groupResults, searchTabs, selectable, selectRange } from './model';
 import { installDragSelection } from './selection';
 import { DEFAULT_PREFERENCES } from './types';
-import type { CloseResult, CloseTarget, Filters, GroupMode, Preferences, SearchResult, Snapshot, TabRecord } from './types';
+import type { BrowserGroup, CloseResult, CloseTarget, Filters, GroupMode, Preferences, SearchResult, Snapshot, TabRecord } from './types';
 
 const search = element<HTMLInputElement>('search');
 const results = element<HTMLDivElement>('results');
@@ -32,6 +34,9 @@ let focusedId: number | undefined;
 let preview: CloseTarget[] = [];
 let previewOptions = { includePinned: false, includeAudible: false };
 let containers = false;
+let groupingAvailable = false;
+let browserGroups: BrowserGroup[] = [];
+let groupWindows: { id: number }[] = [];
 let currentWindow = 0;
 let busy = false;
 let hasMouseMoved = false;
@@ -52,7 +57,7 @@ function clearSelection(): void { selected.clear(); anchor = undefined; }
 function selectedChanged(): void {
   element('bulk').hidden = selected.size === 0;
   element('selected-count').textContent = `${selected.size} selected`;
-  results.querySelectorAll<HTMLInputElement>('input[data-tab-id]').forEach(input => { input.checked = selected.has(Number(input.dataset.tabId)); });
+  results.querySelectorAll<HTMLButtonElement>('.tab-select').forEach(button => { button.setAttribute('aria-pressed', String(selected.has(Number(button.closest<HTMLElement>('.tab-row')!.dataset.id)))); });
   results.querySelectorAll<HTMLElement>('.tab-row').forEach(row => { row.classList.toggle('selected', selected.has(Number(row.dataset.id))); });
   results.querySelectorAll<HTMLInputElement>('input[data-group]').forEach(input => {
     const ids = (input.dataset.ids ?? '').split(',').filter(Boolean).map(Number);
@@ -62,6 +67,9 @@ function selectedChanged(): void {
   });
   results.querySelectorAll<HTMLElement>('.domain-card').forEach(card => { card.classList.toggle('selected', (card.dataset.ids ?? '').split(',').some(id => selected.has(Number(id)))); });
   element<HTMLButtonElement>('close-selected').disabled = busy;
+  const groupButton = element<HTMLButtonElement>('group-selected');
+  groupButton.disabled = busy || !groupingAvailable;
+  groupButton.title = groupingAvailable ? 'Group selected tabs' : 'Browser tab grouping is unavailable in this browser.';
 }
 
 function selectTabs(candidates: TabRecord[], checked = true): void {
@@ -85,13 +93,14 @@ function focusRow(id: number | undefined, scroll = false): void {
   results.querySelectorAll<HTMLElement>('.tab-row').forEach(row => {
     const active = Number(row.dataset.id) === id;
     row.classList.toggle('focused', active);
-    row.querySelector<HTMLButtonElement>('.tab-open')!.tabIndex = active ? 0 : -1;
+    row.querySelectorAll<HTMLButtonElement>('.tab-select, .tab-open').forEach(button => { button.tabIndex = active ? 0 : -1; });
     if (active && scroll) row.scrollIntoView({ block: 'nearest' });
   });
 }
 
 const { row, groupCheckbox, domainFolder } = createTabRenderer({
   filters, group: () => groupSelect.value as GroupMode, selected: id => selected.has(id),
+  browserGroup: id => browserGroups.find(group => group.id === id),
   toggle, selectTabs, activate, focus: focusRow,
   hover: id => { if (hasMouseMoved) focusRow(id); },
   openDomain: name => { activeDomain = name; render(); results.focus({ preventScroll: true }); },
@@ -101,7 +110,7 @@ function render(): void {
   const options = filters();
   const matches = searchTabs(tabs, options);
   if (sortSelect.value !== 'recent') matches.sort((a, b) => (Number(a.item.discarded) - Number(b.item.discarded)) * (sortSelect.value === 'loaded' ? 1 : -1));
-  let groups = groupResults(matches, groupSelect.value as GroupMode, preferences.topics);
+  let groups = groupSelect.value === 'browser' ? groupByBrowser(matches, browserGroups, groupWindows.map(window => window.id).sort((a, b) => a - b)) : groupResults(matches, groupSelect.value as GroupMode, preferences.topics);
   const domainMode = groupSelect.value === 'domain';
   if (!domainMode || !groups.some(group => group.name === activeDomain)) activeDomain = undefined;
   const overview = domainMode && activeDomain === undefined;
@@ -120,13 +129,19 @@ function render(): void {
   }
   for (const group of overview ? [] : groups) {
     if (!group.results.length) continue;
+    const groupKey = group.key ?? group.name;
     const section = document.createElement('section');
     if (groupSelect.value !== 'none') {
       section.append(create('div', { className: 'group-heading' }, groupCheckbox(group),
-        create('button', { ariaExpanded: String(!collapsed.has(group.name)), onclick: () => { if (collapsed.has(group.name)) collapsed.delete(group.name); else collapsed.add(group.name); render(); } }, `${collapsed.has(group.name) ? '▸' : '▾'} ${group.name}`),
+        create('button', { ariaExpanded: String(!collapsed.has(groupKey)), onclick: () => { if (collapsed.has(groupKey)) collapsed.delete(groupKey); else collapsed.add(groupKey); render(); } }, `${collapsed.has(groupKey) ? '▸' : '▾'} ${group.name}`),
         create('span', {}, String(group.results.length))));
     }
-    if (!collapsed.has(group.name) || groupSelect.value === 'none') {
+    if (group.color) {
+      const swatch = create('i', { className: 'group-color', title: group.color, ariaHidden: 'true' });
+      swatch.style.backgroundColor = groupColor(group.color);
+      section.querySelector('.group-heading')?.prepend(swatch);
+    }
+    if (!collapsed.has(groupKey) || groupSelect.value === 'none') {
       const entries = create('div', { className: 'tab-entries' });
       for (const result of group.results) { visible.push(result.item); entries.append(row(result)); }
       section.append(entries);
@@ -138,8 +153,8 @@ function render(): void {
   }
   results.replaceChildren(fragment);
   results.setAttribute('aria-busy', 'false');
-  const keys = { ...DEFAULT_BINDINGS, ...preferences.keybindings };
-  element('keyboard-help').textContent = `Drag adds to selection · ${keys.clearSelection || 'Unbound'} deselects · ${keys.closeSelected || 'Unbound'} closes selected · Keyboard shortcuts in Settings`;
+  const keys = resolveBindings(preferences.keybindings);
+  element('keyboard-help').textContent = `Click selects · ↗ opens tab · Drag adds to selection · ${keys.clearSelection || 'Unbound'} deselects · ${keys.closeSelected || 'Unbound'} closes selected · ${keys.groupSelected || 'Unbound'} groups selected · Keyboard shortcuts in Settings`;
   element('count').textContent = overview ? `${groups.length} domains · ${matches.length} tabs` : activeDomain !== undefined ? `${scopedMatches.length} tabs · ${activeDomain}` : `${matches.length} of ${tabs.length} tabs`;
   element<HTMLButtonElement>('select-all').disabled = !scopedMatches.some(result => selectable(result.item, options));
   if (!visible.some(tab => tab.id === focusedId)) focusedId = visible[0]?.id;
@@ -149,7 +164,7 @@ function render(): void {
 
 function windowOptions(): void {
   const previous = windowSelect.value;
-  const ids = [...new Set(tabs.map(tab => tab.windowId))].sort((a, b) => a - b);
+  const ids = [...new Set(groupWindows.length ? groupWindows.map(window => window.id) : tabs.map(tab => tab.windowId))].sort((a, b) => a - b);
   windowSelect.replaceChildren(new Option('All windows', 'all'));
   ids.forEach((id, index) => windowSelect.add(new Option(`Window ${index + 1}${id === currentWindow ? ' (this window)' : ''}`, String(id))));
   windowSelect.value = ids.includes(Number(previous)) ? previous : 'all';
@@ -169,6 +184,10 @@ async function refresh(): Promise<void> {
       tabs = snapshot.tabs;
       preferences = snapshot.preferences;
       containers = snapshot.containers;
+      groupingAvailable = snapshot.groupingAvailable ?? false;
+      browserGroups = snapshot.browserGroups ?? [];
+      groupWindows = snapshot.groupWindows ?? [];
+      groupSelect.querySelector<HTMLOptionElement>('option[value=browser]')!.disabled = !groupingAvailable;
       sortSelect.value = preferences.sort ?? 'recent';
       layoutSelect.value = preferences.layout ?? 'grid';
       if (groupSelect.value !== preferences.group) { groupSelect.value = preferences.group; clearSelection(); collapsed.clear(); }
@@ -180,9 +199,9 @@ async function refresh(): Promise<void> {
       const active = document.activeElement as HTMLElement | null;
       const activeRow = active?.closest<HTMLElement>('.tab-row');
       const activeId = activeRow?.dataset.id;
-      const wasCheckbox = active instanceof HTMLInputElement;
+      const wasOpenButton = active?.classList.contains('tab-open');
       render();
-      if (activeId) results.querySelector<HTMLElement>(`.tab-row[data-id="${activeId}"] ${wasCheckbox ? 'input' : '.tab-open'}`)?.focus({ preventScroll: true });
+      if (activeId) results.querySelector<HTMLElement>(`.tab-row[data-id="${activeId}"] ${wasOpenButton ? '.tab-open' : '.tab-select'}`)?.focus({ preventScroll: true });
     } while (refreshAgain);
   } catch (error) { status(error instanceof Error ? error.message : String(error)); results.setAttribute('aria-busy', 'false'); }
   finally { refreshing = false; }
@@ -252,14 +271,21 @@ installRecovery({
   busy: () => busy, setBusy: value => { busy = value; },
   windowId: () => currentWindow, refresh,
 });
+const openGrouping = installGrouping({
+  targets: () => !dragSelection.pending() ? [...selected.values()] : [],
+  busy: () => busy, setBusy: value => { busy = value; selectedChanged(); },
+  windowId: () => currentWindow, refresh, clearSelection, status,
+});
 installKeyboard(search, results, {
   state: () => ({
     bindings: preferences.keybindings, visible, focusedId, grid: layoutSelect.value === 'grid',
+    canGroup: groupingAvailable && !busy && !dragSelection.pending() && selected.size > 0,
     canClose: !busy && !dragSelection.pending() && selected.size > 0,
   }),
   pointerMoved: moved => { hasMouseMoved = moved; },
   clearSelection: () => { dragSelection.cancel(); clearSelection(); selectedChanged(); },
   closeSelected: () => { void closeTargets([...selected.values()].map(target => ({ ...target })), { includePinned: pinned.checked, includeAudible: audible.checked }); },
+  groupSelected: openGrouping,
   focus: focusRow, activate,
   toggleSelection: (id, range) => {
     const tab = visible.find(tab => tab.id === id);

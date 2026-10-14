@@ -1,5 +1,5 @@
 export const DEFAULT_BINDINGS = {
-  clearSelection: 'Escape', closeSelected: 'Backspace', openTab: 'Enter',
+  groupSelected: 'G', clearSelection: 'Escape', closeSelected: 'Backspace', openTab: 'Enter',
   toggleSelection: 'Space', selectRange: 'Shift+Space',
   up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
   next: 'Ctrl+N', previous: 'Ctrl+P', clearSearch: '',
@@ -7,7 +7,7 @@ export const DEFAULT_BINDINGS = {
 export type KeyAction = keyof typeof DEFAULT_BINDINGS;
 export type KeyBindings = Record<KeyAction, string>;
 export const KEY_LABELS: Record<KeyAction, string> = {
-  clearSelection: 'Deselect all / cancel drag', closeSelected: 'Close selected tabs', openTab: 'Open focused tab',
+  groupSelected: 'Group selected tabs', clearSelection: 'Deselect all / cancel drag', closeSelected: 'Close selected tabs', openTab: 'Open focused tab',
   toggleSelection: 'Toggle focused selection', selectRange: 'Extend selection to focused tab',
   up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right',
   next: 'Next tab', previous: 'Previous tab', clearSearch: 'Clear search',
@@ -26,9 +26,15 @@ export function normalizeBinding(value: string): string {
   return [...modifiers.filter(mod => mods.includes(mod)), key].join('+');
 }
 
+export function resolveBindings(value: Partial<KeyBindings> = {}): KeyBindings {
+  // Preserve a pre-existing G shortcut when upgrading older saved settings.
+  const legacyG = value.groupSelected === undefined && Object.entries(value).some(([action, binding]) => action !== 'groupSelected' && typeof binding === 'string' && binding.trim().toUpperCase() === 'G');
+  return { ...DEFAULT_BINDINGS, ...value, groupSelected: value.groupSelected ?? (legacyG ? '' : DEFAULT_BINDINGS.groupSelected) };
+}
+
 export function validateBindings(value: Partial<KeyBindings> = {}): KeyBindings {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid keyboard settings.');
-  const bindings = { ...DEFAULT_BINDINGS };
+  const bindings = resolveBindings(value);
   const used = new Set<string>();
   for (const action of Object.keys(bindings) as KeyAction[]) {
     const binding = normalizeBinding(value[action] ?? bindings[action]);

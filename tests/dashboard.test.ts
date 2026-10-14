@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import { tab } from './helpers';
 import type { RecoveryBatch, Request, RestoreResult, Snapshot, TabRecord } from '../src/types';
 
-async function dashboard(snapshot: Snapshot, batches: RecoveryBatch[] = [], restore: () => Promise<RestoreResult> = async () => ({ reopened: 0, failed: 0 })) {
+async function dashboard(snapshot: Snapshot, batches: RecoveryBatch[] = [], restore: () => Promise<RestoreResult> = async () => ({ reopened: 0, failed: 0 }), group: (message: Extract<Request, { type: 'group-tabs' }>) => Promise<unknown> = async message => ({ groupId: 10, grouped: message.targets.length })) {
   const html = await readFile('dist/index.html', 'utf8');
   const file = (await readdir('dist/assets')).find(file => file.endsWith('.js'))!;
   const script = await readFile(`dist/assets/${file}`, 'utf8');
@@ -28,6 +28,9 @@ async function dashboard(snapshot: Snapshot, batches: RecoveryBatch[] = [], rest
         messages.push(structuredClone(message));
         let value: unknown;
         if (message.type === 'snapshot') value = structuredClone(snapshot);
+        if (message.type === 'group-tabs') {
+          try { value = await group(message); } catch (error) { return { ok: false, error: String(error) }; }
+        }
         if (message.type === 'close') value = { closed: message.targets.length, skipped: 0, failed: 0, interrupted: false };
         if (message.type === 'preferences') snapshot.preferences = message.preferences;
         if (message.type === 'recovery') value = structuredClone(batches);
@@ -42,7 +45,7 @@ async function dashboard(snapshot: Snapshot, batches: RecoveryBatch[] = [], rest
   } });
   window.HTMLElement.prototype.scrollIntoView = () => {};
   window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
-  window.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+  window.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new window.Event('close')); };
   window.eval(script);
   const settle = () => new Promise(resolve => setTimeout(resolve, 30));
   await settle();
@@ -56,12 +59,13 @@ test('dashboard supports search, selection, preview isolation, and normal Tab na
   const search = document.querySelector<HTMLInputElement>('#search')!;
   assert.equal(document.activeElement, search);
   assert.equal(document.querySelectorAll('.tab-row').length, 3);
-  assert.equal(document.querySelector<HTMLInputElement>('input[data-tab-id="3"]')!.disabled, true);
-  const checkbox = document.querySelector<HTMLInputElement>('input[data-tab-id="1"]')!;
-  checkbox.focus();
+  assert.equal(document.querySelector<HTMLButtonElement>('.tab-row[data-id="3"] .tab-select')!.disabled, true);
+  const selection = document.querySelector<HTMLButtonElement>('.tab-row[data-id="1"] .tab-select')!;
+  selection.focus();
   const space = new window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
-  checkbox.dispatchEvent(space);
-  assert.equal(space.defaultPrevented, false, 'checkboxes keep native keyboard behavior');
+  selection.dispatchEvent(space);
+  assert.equal(space.defaultPrevented, true, 'Space toggles the focused row selection');
+  assert.equal(selection.getAttribute('aria-pressed'), 'true');
   search.focus();
   const tabKey = new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
   search.dispatchEvent(tabKey);
@@ -201,9 +205,9 @@ test('grid drag selection adds across gestures, protects tabs, cancels, and defe
     Object.defineProperty(event, 'pointerId', { value: 1 });
     target.dispatchEvent(event);
   }
-  const checked = () => [...document.querySelectorAll<HTMLInputElement>('input[data-tab-id]:checked')].map(input => Number(input.dataset.tabId));
-  const first = document.querySelector<HTMLButtonElement>('.tab-open')!;
-  document.querySelector<HTMLInputElement>('input[data-tab-id="6"]')!.click();
+  const checked = () => [...document.querySelectorAll<HTMLElement>('.tab-row.selected')].map(row => Number(row.dataset.id));
+  const first = document.querySelector<HTMLButtonElement>('.tab-select')!;
+  document.querySelector<HTMLButtonElement>('.tab-row[data-id="6"] .tab-select')!.click();
   pointer(first, 'pointerdown', 25, 155);
   pointer(document, 'pointermove', 235, 245);
   assert.deepEqual(checked(), [1, 2, 4, 5, 6]);
@@ -345,7 +349,7 @@ test('dashboard shortcuts can be remapped, disabled, reset, and persisted withou
   click('select-all'); document.querySelector<HTMLElement>('#results')!.focus();
   key('Escape'); assert.equal(document.querySelector('#selected-count')!.textContent, '1 selected');
   key('k', true); assert.equal(document.querySelector<HTMLElement>('#bulk')!.hidden, true);
-  click('select-all'); document.querySelector<HTMLButtonElement>('.tab-open')!.focus();
+  click('select-all'); document.querySelector<HTMLButtonElement>('.tab-select')!.focus();
   assert.equal(key('Enter').defaultPrevented, true);
   assert.equal(key('Backspace').defaultPrevented, false);
   assert.equal(messages.some(message => message.type === 'activate' || message.type === 'close'), false);
@@ -361,5 +365,168 @@ test('dashboard shortcuts can be remapped, disabled, reset, and persisted withou
   click('settings-open'); click('bindings-reset'); click('save-settings'); await settle();
   assert.equal(snapshot.preferences.keybindings?.closeSelected, 'Backspace');
   assert.equal(snapshot.preferences.keybindings?.clearSelection, 'Escape');
+  dom.window.close();
+});
+
+test('G opens the group picker with cross-window and pinned details and submits existing or new groups', async () => {
+  const snapshot: Snapshot = { tabs: [tab(1), tab(2, { windowId: 2, pinned: true })], preferences: { group: 'none', topics: [] }, containers: false,
+    groupingAvailable: true, browserGroups: [{ id: 10, title: 'Work', color: 'blue', windowId: 2 }], groupWindows: [{ id: 1 }, { id: 2 }] };
+  const { dom, window, messages, settle } = await dashboard(snapshot);
+  const document = window.document;
+  const click = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`)!.click();
+  const key = (options = {}) => {
+    const event = new window.KeyboardEvent('keydown', { key: 'g', bubbles: true, cancelable: true, ...options });
+    document.activeElement!.dispatchEvent(event); return event;
+  };
+  const dialog = document.querySelector<HTMLDialogElement>('#group-dialog')!;
+  document.querySelector<HTMLElement>('#results')!.focus();
+  assert.equal(key().defaultPrevented, false, 'empty selection is ignored');
+  document.querySelector<HTMLInputElement>('#include-pinned')!.click(); click('select-all');
+  document.querySelector<HTMLInputElement>('#search')!.focus();
+  assert.equal(key().defaultPrevented, false, 'typing g still searches');
+  document.querySelector<HTMLElement>('#results')!.focus();
+  assert.equal(key({ repeat: true }).defaultPrevented, false);
+  assert.equal(key({ ctrlKey: true }).defaultPrevented, false);
+  assert.equal(key().defaultPrevented, true); await settle();
+  assert.equal(dialog.open, true);
+  assert.match(document.querySelector('#group-description')!.textContent!, /2 selected · 1 will change windows.*1 pinned tab will be unpinned/);
+  assert.match(document.querySelector('#group-destination')!.textContent!, /Work.*Window 2.*blue/);
+  assert.equal(key().defaultPrevented, false, 'open dialog guards shortcuts');
+  click('group-cancel');
+  assert.equal(document.querySelector('#selected-count')!.textContent, '2 selected');
+  assert.equal(document.activeElement!.id, 'results');
+  click('group-selected'); await settle();
+  click('confirm-group'); await settle();
+  const existing = messages.find(message => message.type === 'group-tabs')!;
+  assert.ok(existing.type === 'group-tabs');
+  assert.deepEqual(existing.destination, { groupId: 10 });
+  assert.deepEqual(existing.targets.map(target => target.id), [1, 2]);
+  assert.equal(dialog.open, false);
+  assert.equal(document.querySelector<HTMLElement>('#bulk')!.hidden, true);
+  assert.equal(snapshot.preferences.group, 'none');
+  click('select-all'); click('group-selected'); await settle();
+  const select = document.querySelector<HTMLSelectElement>('#group-destination')!;
+  select.value = 'new'; select.dispatchEvent(new window.Event('change'));
+  assert.equal(document.querySelector<HTMLSelectElement>('#group-window')!.value, '1');
+  assert.equal(document.querySelector<HTMLButtonElement>('#confirm-group')!.disabled, true);
+  const name = document.querySelector<HTMLInputElement>('#group-name')!;
+  name.value = '  Research  '; name.dispatchEvent(new window.Event('input'));
+  click('confirm-group'); await settle();
+  const created = messages.filter(message => message.type === 'group-tabs').at(-1)!;
+  assert.ok(created.type === 'group-tabs');
+  assert.deepEqual(created.destination, { name: 'Research', windowId: 1 });
+  dom.window.close();
+});
+
+test('group failure preserves selection and browser-group sections refresh and collapse independently', async () => {
+  const snapshot: Snapshot = { tabs: [tab(1, { groupId: 10 }), tab(2, { groupId: 20 }), tab(3)], preferences: { group: 'browser', topics: [] }, containers: false,
+    groupingAvailable: true, browserGroups: [{ id: 10, title: 'Work', color: 'blue', windowId: 1 }, { id: 20, title: 'Work', color: 'red', windowId: 1 }], groupWindows: [{ id: 1 }] };
+  const { dom, window, notify, settle } = await dashboard(snapshot, [], undefined, async () => { throw new Error('Group no longer exists'); });
+  const document = window.document;
+  assert.equal(document.querySelectorAll('.group-heading').length, 3);
+  document.querySelector<HTMLButtonElement>('.group-heading button')!.click();
+  assert.equal(document.querySelectorAll('.tab-row').length, 2);
+  document.querySelector<HTMLButtonElement>('#select-all')!.click();
+  document.querySelector<HTMLButtonElement>('#group-selected')!.click(); await settle();
+  document.querySelector<HTMLButtonElement>('#confirm-group')!.click(); await settle();
+  assert.equal(document.querySelector<HTMLDialogElement>('#group-dialog')!.open, true);
+  assert.match(document.querySelector('#group-status')!.textContent!, /Group no longer exists/);
+  assert.equal(document.querySelector('#selected-count')!.textContent, '3 selected');
+  document.querySelector<HTMLButtonElement>('#group-cancel')!.click();
+  snapshot.browserGroups![0].title = 'Renamed'; notify(); await settle();
+  assert.match(document.querySelector('.group-heading')!.textContent!, /Renamed/);
+  snapshot.groupingAvailable = false; notify(); await settle();
+  assert.equal(document.querySelector<HTMLButtonElement>('#group-selected')!.disabled, true);
+  dom.window.close();
+});
+
+test('group shortcuts can be customized and disabled, and new groups default to the selection window', async () => {
+  const snapshot: Snapshot = { tabs: [tab(1, { windowId: 2 })], preferences: { group: 'none', topics: [] }, containers: false,
+    groupingAvailable: true, browserGroups: [], groupWindows: [{ id: 1 }, { id: 2 }] };
+  const { dom, window, settle } = await dashboard(snapshot);
+  const document = window.document;
+  const click = (id: string) => document.querySelector<HTMLButtonElement>(`#${id}`)!.click();
+  const key = (key: string, ctrlKey = false) => document.activeElement!.dispatchEvent(new window.KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true }));
+  click('settings-open');
+  const binding = document.querySelector<HTMLInputElement>('input[data-action=groupSelected]')!;
+  binding.value = 'Ctrl+G'; click('save-settings'); await settle();
+  click('select-all'); document.querySelector<HTMLElement>('#results')!.focus();
+  key('g'); assert.equal(document.querySelector<HTMLDialogElement>('#group-dialog')!.open, false);
+  key('g', true); await settle();
+  assert.equal(document.querySelector<HTMLDialogElement>('#group-dialog')!.open, true);
+  assert.equal(document.querySelector<HTMLSelectElement>('#group-window')!.value, '2');
+  assert.equal(document.querySelector<HTMLElement>('#new-group-fields')!.hidden, false);
+  click('group-cancel'); click('settings-open');
+  document.querySelector<HTMLInputElement>('input[data-action=groupSelected]')!.value = '';
+  click('save-settings'); await settle();
+  click('select-all'); document.querySelector<HTMLElement>('#results')!.focus();
+  key('g', true); await settle();
+  assert.equal(document.querySelector<HTMLDialogElement>('#group-dialog')!.open, false);
+  dom.window.close();
+});
+
+test('row clicks select tabs while the leading open button activates without changing selection', async () => {
+  const snapshot: Snapshot = { tabs: [tab(1), tab(2), tab(3, { pinned: true }), tab(4, { audible: true })], preferences: { group: 'none', topics: [], layout: 'list' }, containers: false };
+  const { dom, window, messages, notify, settle } = await dashboard(snapshot);
+  const document = window.document;
+  const row = (id: number) => document.querySelector<HTMLElement>(`.tab-row[data-id="${id}"]`)!;
+  const selected = () => [...document.querySelectorAll<HTMLElement>('.tab-row.selected')].map(row => Number(row.dataset.id));
+  assert.equal(document.querySelectorAll('.tab-row input[type=checkbox]').length, 0);
+  assert.equal(row(1).firstElementChild!.className, 'tab-open');
+  row(1).querySelector<HTMLElement>('.tab-title')!.click();
+  assert.deepEqual(selected(), [1]);
+  assert.equal(row(1).querySelector('.tab-select')!.getAttribute('aria-pressed'), 'true');
+  row(1).querySelector<HTMLElement>('.tab-url')!.click();
+  assert.deepEqual(selected(), []);
+  row(1).querySelector<HTMLElement>('.tab-icon')!.click();
+  row(2).querySelector<HTMLElement>('.tab-age')!.dispatchEvent(new window.MouseEvent('click', { bubbles: true, shiftKey: true }));
+  assert.deepEqual(selected(), [1, 2], 'Shift-click extends the range');
+  row(2).click();
+  assert.deepEqual(selected(), [1]);
+  row(3).click(); row(4).querySelector<HTMLElement>('.badges')!.click();
+  assert.deepEqual(selected(), [1], 'protected tabs remain unselectable');
+  assert.equal(messages.some(message => message.type === 'activate'), false);
+  row(1).querySelector<HTMLButtonElement>('.tab-open')!.click();
+  row(3).querySelector<HTMLButtonElement>('.tab-open')!.click();
+  await settle();
+  assert.deepEqual(messages.filter(message => message.type === 'activate').map(message => message.id), [1, 3]);
+  assert.deepEqual(selected(), [1], 'open buttons never toggle selection, including protected tabs');
+  row(1).querySelector<HTMLButtonElement>('.tab-select')!.focus();
+  notify(); await settle();
+  assert.ok(document.activeElement!.classList.contains('tab-select'), 'refresh keeps selection-button focus');
+  row(1).querySelector<HTMLButtonElement>('.tab-open')!.focus();
+  notify(); await settle();
+  assert.ok(document.activeElement!.classList.contains('tab-open'), 'refresh keeps open-button focus');
+  const layout = document.querySelector<HTMLSelectElement>('#layout')!;
+  layout.value = 'grid'; layout.dispatchEvent(new window.Event('change')); await settle();
+  row(2).querySelector<HTMLElement>('.tab-title')!.click();
+  assert.deepEqual(selected(), [1, 2]);
+  dom.window.close();
+});
+
+test('overall view marks grouped tabs with their names and colors and updates membership live', async () => {
+  const snapshot: Snapshot = { tabs: [tab(1, { groupId: 10 }), tab(2, { groupId: -1 }), tab(3, { groupId: 20 }), tab(4, { groupId: 30 })], preferences: { group: 'none', topics: [] }, containers: false,
+    groupingAvailable: true, browserGroups: [{ id: 10, title: 'Research', color: 'blue', windowId: 1 }, { id: 20, title: '', color: 'red', windowId: 1 }], groupWindows: [{ id: 1 }] };
+  const { dom, window, notify, settle } = await dashboard(snapshot);
+  const document = window.document;
+  const badge = (id: number) => document.querySelector<HTMLElement>(`.tab-row[data-id="${id}"] .tab-group-badge`);
+  assert.equal(badge(1)!.textContent, 'Research');
+  assert.match(badge(1)!.title, /Browser group: Research/);
+  assert.equal(badge(1)!.querySelector<HTMLElement>('.tab-group-dot')!.style.backgroundColor, 'rgb(66, 133, 244)');
+  assert.equal(badge(2), null);
+  assert.equal(badge(3)!.textContent, 'Unnamed group');
+  assert.equal(badge(4)!.textContent, 'Grouped', 'membership is still visible when group metadata is unavailable');
+  badge(1)!.click();
+  assert.ok(document.querySelector('.tab-row[data-id="1"]')!.classList.contains('selected'));
+  snapshot.browserGroups![0].title = 'Reading';
+  snapshot.tabs[1].groupId = 10;
+  snapshot.tabs[2].groupId = -1;
+  notify(); await settle();
+  assert.equal(badge(1)!.textContent, 'Reading');
+  assert.equal(badge(2)!.textContent, 'Reading');
+  assert.equal(badge(3), null);
+  const layout = document.querySelector<HTMLSelectElement>('#layout')!;
+  layout.value = 'list'; layout.dispatchEvent(new window.Event('change')); await settle();
+  assert.equal(badge(1)!.textContent, 'Reading');
   dom.window.close();
 });

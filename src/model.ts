@@ -1,5 +1,6 @@
+import { browserGroupLabel } from './browser-groups';
 import microfuzz from '@nozbe/microfuzz';
-import type { Filters, GroupMode, SearchResult, TabGroup, TabRecord, TopicRule } from './types';
+import type { BrowserGroup, Filters, GroupMode, SearchResult, TabGroup, TabRecord, TopicRule } from './types';
 
 export const DAY = 86_400_000;
 const BUCKETS = ['Today', 'Previous 7 days', 'Previous 30 days', 'Older', 'Unknown'];
@@ -62,6 +63,17 @@ export function groupResults(results: SearchResult[], mode: GroupMode, rules: To
   return [...groups.values()].sort((a, b) => mode === 'opened' || mode === 'accessed'
     ? BUCKETS.indexOf(a.name) - BUCKETS.indexOf(b.name)
     : a.name === 'Uncategorized' ? 1 : b.name === 'Uncategorized' ? -1 : a.name.localeCompare(b.name));
+}
+
+export function groupByBrowser(results: SearchResult[], browserGroups: BrowserGroup[], windowIds: number[]): TabGroup[] {
+  const groups = new Map<string, TabGroup>();
+  for (const result of results) {
+    const native = browserGroups.find(group => group.id === result.item.groupId);
+    const key = native ? `browser:${native.id}` : 'browser:ungrouped';
+    const group = groups.get(key) ?? { key, name: native ? browserGroupLabel(native, `Window ${windowIds.indexOf(native.windowId) + 1}`) : 'Ungrouped', color: native?.color, results: [] };
+    group.results.push(result); groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => a.key === 'browser:ungrouped' ? 1 : b.key === 'browser:ungrouped' ? -1 : a.name.localeCompare(b.name));
 }
 
 export function selectable(tab: TabRecord, filters: Pick<Filters, 'includePinned' | 'includeAudible'>): boolean {

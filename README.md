@@ -5,9 +5,11 @@ I slopped this together because I hoard too many tabs in Zen (500+) and need a g
 ## features
 
 - fuzzy search by title or URL
-- group by domain, date, or topic
+- group by domain, date, topic, or browser tab group
+- press **G** with tabs selected (or click **Group selected…**) to add them to an existing browser group or create a named group; tabs can move across windows, and selected pinned tabs are unpinned
 - filter by window or time since last used
-- drag to select and bulk close tabs
+- click a tab row to select it, Shift-click to select a range, or drag to select and bulk close tabs
+- use the ↗ button beside each tab to switch to it
 - reopen closed tabs from local recovery
 - customizable keyboard shortcuts
 

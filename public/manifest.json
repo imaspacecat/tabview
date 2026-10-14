@@ -3,7 +3,7 @@
   "name": "Tabview",
   "version": "0.1.0",
   "description": "Search, organize, and close tabs in a minimal dashboard with local recovery.",
-  "permissions": ["tabs", "storage", "sessions"],
+  "permissions": ["tabs", "storage", "sessions", "tabGroups"],
   "optional_permissions": ["cookies"],
   "incognito": "not_allowed",
   "background": { "scripts": ["background.js"] },

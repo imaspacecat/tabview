@@ -64,3 +64,19 @@ test('search and grouping 1,000 tabs complete well under one second', () => {
   assert.equal(groupResults(matches, 'domain', []).length, 1);
   assert.ok(performance.now() - start < 1000);
 });
+
+test('browser groups use identity, distinguish duplicate titles, and put ungrouped tabs last', async () => {
+  const { groupByBrowser } = await import('../src/model');
+  const native = [
+    { id: 10, title: 'Work', color: 'blue', windowId: 1 },
+    { id: 20, title: 'Work', color: 'red', windowId: 2 },
+    { id: 30, title: '', color: 'grey', windowId: 1 },
+  ];
+  const groups = groupByBrowser([tab(1, { groupId: 10 }), tab(2, { groupId: 20 }), tab(3, { groupId: 30 }), tab(4)].map(item => ({ item })), native, [1, 2]);
+  assert.equal(groups.length, 4);
+  assert.equal(new Set(groups.map(group => group.key)).size, 4);
+  assert.match(groups.find(group => group.key === 'browser:20')!.name, /Work.*Window 2/);
+  assert.match(groups.find(group => group.key === 'browser:30')!.name, /Unnamed group/);
+  assert.equal(groups.at(-1)!.name, 'Ungrouped');
+  assert.equal(groups.find(group => group.key === 'browser:10')!.color, 'blue');
+});

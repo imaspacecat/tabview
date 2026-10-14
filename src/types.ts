@@ -2,9 +2,10 @@ import type { KeyBindings } from './keybindings';
 export interface TabRecord extends Required<Pick<browser.tabs.Tab, 'id' | 'windowId' | 'index' | 'title' | 'url' | 'pinned' | 'audible' | 'hidden' | 'discarded'>>, Pick<browser.tabs.Tab, 'lastAccessed' | 'cookieStoreId' | 'favIconUrl'> {
   key: string;
   openedAt?: number;
+  groupId?: number;
 }
 
-export type GroupMode = 'none' | 'domain' | 'opened' | 'accessed' | 'topic';
+export type GroupMode = 'none' | 'domain' | 'opened' | 'accessed' | 'topic' | 'browser';
 export interface TopicRule { name: string; keywords: string[] }
 export type SortMode = 'recent' | 'loaded' | 'unloaded';
 export interface Preferences { group: GroupMode; topics: TopicRule[]; layout?: 'grid' | 'list'; sort?: SortMode; keybindings?: KeyBindings }
@@ -18,7 +19,10 @@ export interface Filters {
 }
 export type Ranges = [number, number][];
 export interface SearchResult { item: TabRecord; matches?: (Ranges | null)[] }
-export interface TabGroup { name: string; results: SearchResult[] }
+export interface TabGroup { name: string; key?: string; color?: string; results: SearchResult[] }
+export interface BrowserGroup { id: number; title: string; color: string; windowId: number }
+export type GroupDestination = { groupId: number } | { name: string; windowId: number };
+export interface GroupResult { groupId: number; grouped: number; warning?: string }
 export interface CloseTarget { id: number; key: string; url: string }
 export type RecoveryStatus = 'pending' | 'closed' | 'failed' | 'uncertain' | 'reopening' | 'reopen-uncertain' | 'reopened';
 export interface RecoveryEntry {
@@ -30,9 +34,10 @@ export interface RecoveryEntry {
 export interface RecoveryBatch { id: string; createdAt: number; entries: RecoveryEntry[] }
 export interface CloseResult { closed: number; skipped: number; failed: number; interrupted: boolean }
 export interface RestoreResult { reopened: number; failed: number }
-export interface Snapshot { tabs: TabRecord[]; preferences: Preferences; containers: boolean }
+export interface Snapshot { tabs: TabRecord[]; preferences: Preferences; containers: boolean; groupingAvailable?: boolean; browserGroups?: BrowserGroup[]; groupWindows?: { id: number }[] }
 export type Request =
   | { type: 'snapshot' }
+  | { type: 'group-tabs'; targets: CloseTarget[]; destination: GroupDestination }
   | { type: 'activate'; id: number }
   | { type: 'preferences'; preferences: Preferences }
   | { type: 'close'; targets: CloseTarget[]; includePinned: boolean; includeAudible: boolean }

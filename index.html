@@ -16,7 +16,7 @@
       <label class="sr-only" for="search">Search titles and URLs</label>
       <input id="search" type="search" placeholder="Search tabs…" autocomplete="off" autofocus />
       <div class="controls">
-        <label>Group <select id="group"><option value="none">None</option><option value="domain">Domain</option><option value="opened">Date opened</option><option value="accessed">Last accessed</option><option value="topic">Topic</option></select></label>
+        <label>Group <select id="group"><option value="none">None</option><option value="domain">Domain</option><option value="opened">Date opened</option><option value="accessed">Last accessed</option><option value="topic">Topic</option><option value="browser">Browser group</option></select></label>
         <label>Sort <select id="sort"><option value="recent">Recent first</option><option value="loaded">Loaded first</option><option value="unloaded">Unloaded first</option></select></label>
         <label>Window <select id="window"><option value="all">All windows</option></select></label>
         <label>Age <select id="age"><option value="all">Any age</option><option value="7">Not accessed in 7 days</option><option value="30">Not accessed in 30 days</option><option value="unknown">Unknown last access</option></select></label>
@@ -26,9 +26,23 @@
       <div class="list-toolbar"><span id="count" aria-live="polite">Loading tabs…</span><button id="select-all">Select all matching</button></div>
       <p id="status" role="status" hidden></p>
       <div id="results" tabindex="-1" aria-label="Tabs" aria-busy="true"></div>
-      <div id="bulk" hidden><strong id="selected-count"></strong><button id="clear-selection">Clear</button><button id="close-selected">Review close…</button></div>
+      <div id="bulk" hidden><strong id="selected-count"></strong><button id="clear-selection">Clear</button><button id="group-selected">Group selected…</button><button id="close-selected">Review close…</button></div>
       <footer id="keyboard-help">Arrow keys navigate · Enter opens · Drag adds to selection · Backspace closes selected · Shift-click selects a range</footer>
     </main>
+    <dialog id="group-dialog" aria-labelledby="group-title">
+      <form id="group-form">
+        <h2 id="group-title">Group selected tabs</h2>
+        <p id="group-description"></p>
+        <label class="stack">Destination group<select id="group-destination"></select></label>
+        <span id="group-color" class="group-color" aria-hidden="true" hidden></span>
+        <div id="new-group-fields">
+          <label class="stack">Group name<input id="group-name" type="text" autocomplete="off" /></label>
+          <label class="stack">Destination window<select id="group-window"></select></label>
+        </div>
+        <p id="group-status" role="status"></p>
+        <div class="dialog-actions"><button id="group-cancel" type="button">Cancel</button><button id="confirm-group" type="submit" disabled>Group tabs</button></div>
+      </form>
+    </dialog>
     <dialog id="close-dialog" aria-labelledby="close-title">
       <h2 id="close-title">Close selected tabs?</h2>
       <p id="close-description"></p>

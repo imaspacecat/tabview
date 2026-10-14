@@ -4,6 +4,9 @@ import { DEFAULT_BINDINGS, matchesBinding, normalizeBinding, validateBindings } 
 
 test('keyboard settings migrate defaults, normalize modifiers, and reject conflicts or invalid keys', () => {
   assert.deepEqual(validateBindings(), DEFAULT_BINDINGS);
+  assert.equal(validateBindings({ next: 'G' }).groupSelected, '', 'existing G bindings survive migration');
+  assert.equal(validateBindings({ groupSelected: 'Ctrl+G' }).groupSelected, 'Ctrl+G');
+  assert.throws(() => validateBindings({ groupSelected: 'G', next: 'G' }), /more than once/);
   assert.equal(normalizeBinding('shift + ctrl + k'), 'Ctrl+Shift+K');
   assert.equal(validateBindings({ closeSelected: 'delete', clearSearch: 'Ctrl+L' }).closeSelected, 'Delete');
   assert.equal(validateBindings({ closeSelected: '' }).closeSelected, '');
