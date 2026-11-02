@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tabview",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Search, organize, and close tabs in a minimal dashboard with local recovery.",
   "permissions": ["tabs", "storage", "sessions", "tabGroups"],
   "optional_permissions": ["cookies"],
